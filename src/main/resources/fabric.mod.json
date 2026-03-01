@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "scrollwalk",
+  "version": "${version}",
+  "name": "ScrollWalk",
+  "description": "Hold Alt and Scroll to dynamically adjust your movement speed.",
+  "authors": [
+  ],
+  "contact": {
+    "homepage": "https://modrinth.com/mod/scroll-walk",
+    "issues": "https://github.com/Naw7k/Scroll-Walk/issues"
+  },
+  "license": "MIT",
+  "icon": "assets/scrollwalk/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "main": [
+      "net.naw.scrollwalk.ScrollWalk"
+    ],
+    "modmenu": [
+      "net.naw.scrollwalk.ModMenuIntegration"
+    ]
+  },
+  "mixins": [
+    "scrollwalk.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}",
+    "cloth-config2": "*",
+    "modmenu": "*"
+  }
+}
