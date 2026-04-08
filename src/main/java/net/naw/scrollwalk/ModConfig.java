@@ -18,4 +18,6 @@ public class ModConfig implements ConfigData {
     public float minSpeed = 0.05f;
     // The amount the speed changes with each scroll tick
     public float scrollStep = 0.02f;
+    // Controls how quickly the speed transitions to the target value
+    public float acceleration = 0.1f;
 }
