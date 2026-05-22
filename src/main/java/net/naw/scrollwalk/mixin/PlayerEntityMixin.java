@@ -11,72 +11,82 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-// Mixin into PlayerEntity to modify player movement behavior
+// Mixin into Player to apply scroll-based speed changes and display the speedometer HUD
 @Mixin(Player.class)
 public class PlayerEntityMixin {
 
-    // Unique fields for tracking state across ticks
-    @Unique
-    private Vec3 previousPosition = null;
-    @Unique
-    private double smoothKmh = 0.0;
-    @Unique
-    private boolean lastWasVisible = false;
+    // Used to calculate km/h from position delta
+    @Unique private Vec3 previousPosition = null;
+    @Unique private double smoothKmh = 0.0;
+    // Tracks whether the speedometer was visible last tick so we can clear it when disabled
+    @Unique private boolean lastWasVisible = false;
 
-    // The "Internal" speed that slides toward the target to create smooth acceleration
-    @Unique
-    private double momentumSpeed = 0.1;
+    // Morphling compat — cached via reflection so we don't do Class.forName every tick
+    @Unique private static Class<?> morphStateClass = null;
+    @Unique private static boolean morphlingChecked = false;
 
-    // Inject into the tick method to run code every game tick
     @Inject(method = "tick", at = @At("HEAD"))
     private void onTick(CallbackInfo ci) {
         Player player = (Player) (Object) this;
 
-        // 1. MOMENTUM LOGIC - Smoothly interpolate current speed towards target speed
-        // Using ScrollWalk instead of ScrollSpeed
-        momentumSpeed += (ScrollWalk.currentSpeed - momentumSpeed) * ScrollWalk.config.acceleration;
-
-        // Apply the calculated momentum speed to the player's movement attribute
         var attribute = player.getAttribute(Attributes.MOVEMENT_SPEED);
-        if (attribute != null) {
-            attribute.setBaseValue(momentumSpeed);
+        if (attribute == null) return;
+        if (ScrollWalk.config == null || !ScrollWalk.config.modEnabled) return;
+
+        // Check once if Morphling is installed and cache the result
+        if (!morphlingChecked) {
+            morphlingChecked = true;
+            try {
+                morphStateClass = Class.forName("net.naw.morphling.client.core.MorphState");
+            } catch (Exception ignored) {}
         }
 
-        // 2. Speedometer Logic - Calculates and displays current speed HUD
-        boolean shouldShow = ScrollWalk.config != null && ScrollWalk.config.modEnabled && ScrollWalk.config.showSpeedometer;
+        // Check if player is currently morphed — if so, Morphling owns the speed attribute
+        boolean morphlingActive = false;
+        if (morphStateClass != null) {
+            try {
+                morphlingActive = (boolean) morphStateClass.getMethod("isMorphed").invoke(null);
+            } catch (Exception ignored) {}
+        }
 
+        // Always lerp momentumSpeed toward the target so Morphling can read a smooth value too
+        ScrollWalk.momentumSpeed += (ScrollWalk.currentSpeed - ScrollWalk.momentumSpeed) * ScrollWalk.config.acceleration;
+        if (Math.abs(ScrollWalk.momentumSpeed - ScrollWalk.currentSpeed) < 0.00001) {
+            ScrollWalk.momentumSpeed = ScrollWalk.currentSpeed;
+        }
+
+        // Only apply speed to the attribute when not morphed
+        // When morphed, Morphling reads ScrollWalk.momentumSpeed via ScrollWalkCompat and applies it itself
+        if (!morphlingActive) {
+            if (Math.abs(ScrollWalk.momentumSpeed - attribute.getBaseValue()) > 0.00001) {
+                attribute.setBaseValue(ScrollWalk.momentumSpeed);
+            }
+        }
+
+        // Speedometer HUD — shows current speed multiplier and km/h in the action bar
+        boolean shouldShow = ScrollWalk.config.showSpeedometer;
         if (shouldShow) {
             Vec3 currentPosition = new Vec3(player.getX(), player.getY(), player.getZ());
-
-            // Calculate speed based on distance moved between ticks
             if (previousPosition != null) {
                 double deltaX = currentPosition.x - previousPosition.x;
                 double deltaZ = currentPosition.z - previousPosition.z;
-                // Convert blocks per tick to kilometers per hour
+                // Convert blocks/tick to km/h (20 ticks/sec * 3.6)
                 smoothKmh = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ) * 20 * 3.6;
             }
             previousPosition = currentPosition;
 
-            // Determine current movement state for display
             String state = player.isSprinting() ? "Sprinting" : (player.isCrouching() ? "Sneaking" : "Walking");
-
-            // Change color based on speed severity
-            int tempColor = 0xFFFFFF; // White
-            if (smoothKmh > 30) tempColor = 0xFF5555; // Red
-            else if (smoothKmh > 20) tempColor = 0xFFFF55; // Yellow
-
+            int tempColor = 0xFFFFFF;
+            if (smoothKmh > 30) tempColor = 0xFF5555;
+            else if (smoothKmh > 20) tempColor = 0xFFFF55;
             final int finalColor = tempColor;
-
-            // Target speed display multiplier
+            // Display multiplier is currentSpeed * 10 so 0.1 shows as 1.0x, 0.05 shows as 0.5x etc
             double displayMultiplier = ScrollWalk.currentSpeed * 10;
-
             String content = String.format("Speed: %.1fx | %.1f km/h (%s)", displayMultiplier, smoothKmh, state);
-
-            // Send message to action bar (true = hotbar message)
             player.sendOverlayMessage(Component.literal(content).withStyle(style -> style.withColor(finalColor)));
             lastWasVisible = true;
         } else if (lastWasVisible) {
-            // Clear message when speedometer is disabled
+            // Clear the action bar message when speedometer is turned off
             player.sendOverlayMessage(Component.literal(""));
             lastWasVisible = false;
         }
